@@ -1,0 +1,1255 @@
+---
+title: "STAT GR5261 Final Project Code"
+author: "Yuhao Kang (yk2758), Jiaying Zhang (jz2897), Cheng Peng (cp2990), Jiun-Ying Chen (jc4878)"
+date: "2018/12/18"
+output:
+  html_document:
+    df_print: paged
+---
+```{r setup, warnings=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+############################ Check and install packages #############################
+
+packages.used <- c("quantmod", "dygraphs", "tseries", "htmltools", "e1071",
+                   "GGally", "MASS", "Rsolnp", "ggplot2", "PerformanceAnalytics",
+                   "corrgram", "fGarch", "copula", "sn","ks")
+
+packages.needed <- setdiff(packages.used, 
+                           intersect(installed.packages()[,1], packages.used))
+
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+
+library(quantmod)
+library(dygraphs)
+library(tseries)
+library(htmltools)
+library(e1071)
+library(GGally)
+library(MASS)
+library(Rsolnp)
+library(ggplot2)
+library(PerformanceAnalytics)
+library(corrgram)
+library(fGarch)
+library(copula)
+library(sn)
+library(ks)
+```
+
+```{r}
+library(quantmod)
+library(dygraphs)
+library(tseries)
+library(htmltools)
+library(e1071)
+library(GGally)
+library(MASS)
+library(Rsolnp)
+library(ggplot2)
+library(PerformanceAnalytics)
+#library(corrgram)
+library(fGarch)
+library(copula)
+library(sn)
+#library(ks)
+
+############################ Data Preparation #############################
+#Load data
+
+getSymbols("CMCSA", from = "2010-01-01",to="2018-12-01")
+getSymbols("FISV", from = "2010-01-01",to="2018-12-01")
+getSymbols("MSFT", from = "2010-01-01",to="2018-12-01")
+getSymbols("JNJ", from = "2010-01-01",to="2018-12-01")
+getSymbols("CSCO", from = "2010-01-01",to="2018-12-01")
+getSymbols("ADS", from = "2010-01-01",to="2018-12-01")
+getSymbols("CL", from = "2010-01-01",to="2018-12-01")
+getSymbols("BBT", from = "2010-01-01",to="2018-12-01")
+getSymbols("AAPL", from = "2010-01-01",to="2018-12-01")
+BFB=getSymbols("BF-B", from = "2010-01-01",to="2018-12-01",auto.assign = F)
+getSymbols("^FVX", from = "2010-01-01",to="2018-12-01")  # 5 year treasury yield
+getSymbols("^GSPC", from = "2010-01-01",to="2018-12-01") # SP500
+
+
+## Original data (daily xts)
+dat = cbind(CMCSA[,6],FISV[,6],MSFT[,6],JNJ[,6],CSCO[,6],ADS[,6],CL[,6],BBT[,6],AAPL[,6],
+            BFB[,6],FVX[,6],GSPC[,6])
+colnames(dat) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","Rf","SP500")
+
+## monthly return data
+mon.rf = to.monthly(FVX)[,6]/(100*12)
+colnames(mon.rf) = "Rf"
+
+mon.R = cbind(monthlyReturn(CMCSA[,6]),
+              monthlyReturn(FISV[,6]),
+              monthlyReturn(MSFT[,6]),
+              monthlyReturn(JNJ[,6]),
+              monthlyReturn(CSCO[,6]),
+              monthlyReturn(ADS[,6]),
+              monthlyReturn(CL[,6]),
+              monthlyReturn(BBT[,6]),
+              monthlyReturn(AAPL[,6]),
+              monthlyReturn(BFB[,6]),
+              monthlyReturn(GSPC[,6]))
+colnames(mon.R) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","SP500")
+
+## monthly price data
+mon.price = cbind(to.monthly(CMCSA)[,6],
+                  to.monthly(FISV)[,6],
+                  to.monthly(MSFT)[,6],
+                  to.monthly(JNJ)[,6],
+                  to.monthly(CSCO)[,6],
+                  to.monthly(ADS)[,6],
+                  to.monthly(CL)[,6],
+                  to.monthly(BBT)[,6],
+                  to.monthly(AAPL)[,6],
+                  to.monthly(BFB)[,6],
+                  to.monthly(GSPC)[,6])
+colnames(mon.price) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","SP500")
+
+## First differncing of monthly price data
+lag.mon.price = diff(mon.price)[-1,]
+
+## Monthly cumulative return (equity curve)
+mon.equity.curve = apply(mon.R,2,cumsum)
+
+rm("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","FVX","GSPC")
+```
+
+
+```{r}
+###################### Part 2 Descriptive Statistics ######################
+
+# monthly return of 10 assets & SP500
+# create a list of dygraphs objects
+dy_graph <- list(
+  dygraphs::dygraph(mon.R[,c(1,11)], main=paste(names(mon.R[,1]),"vs SP500")),
+  dygraphs::dygraph(mon.R[,c(2,11)], main=paste(names(mon.R[,2]),"vs SP500")),
+  dygraphs::dygraph(mon.R[,c(3,11)],main=paste(names(mon.R[,3]),"vs SP500")),
+  dygraphs::dygraph(mon.R[,c(4,11)],main=paste(names(mon.R[,4]),"vs SP500")),
+  dygraphs::dygraph(mon.R[,c(5,11)],main=paste(names(mon.R[,5]),"vs SP500")),
+  dygraphs::dygraph(mon.R[,c(6,11)],main=paste(names(mon.R[,6]),"vs SP500")),
+  dygraphs::dygraph(mon.R[,c(7,11)],main=paste(names(mon.R[,7]),"vs SP500")),
+  dygraphs::dygraph(mon.R[,c(8,11)],main=paste(names(mon.R[,8]),"vs SP500")),
+  dygraphs::dygraph(mon.R[,c(9,11)],main=paste(names(mon.R[,9]),"vs SP500")),
+  dygraphs::dygraph(mon.R[,c(10,11),main=paste(names(mon.R[,10]),"vs SP500")])
+)  # end list
+
+ #render the dygraphs objects using htmltools
+htmltools::browsable(htmltools::tagList(dy_graph))
+
+par(mfrow=c(2,5))
+plot.xts(mon.price[,1],main=names(mon.price[,1]))
+plot.xts(mon.price[,2],main=names(mon.price[,2]))
+plot.xts(mon.price[,3],main=names(mon.price[,3]))
+plot.xts(mon.price[,4],main=names(mon.price[,4]))
+plot.xts(mon.price[,5],main=names(mon.price[,5]))
+plot.xts(mon.price[,6],main=names(mon.price[,6]))
+plot.xts(mon.price[,7],main=names(mon.price[,7]))
+plot.xts(mon.price[,8],main=names(mon.price[,8]))
+plot.xts(mon.price[,9],main=names(mon.price[,9]))
+plot.xts(mon.price[,10],main=names(mon.price[,10]))
+#dygraph(mon.price[,1:10]) # Monthly price of 10 assets
+dygraph(mon.price[,11], main="SP500")   # Monthly price of SP500
+
+dygraph(mon.equity.curve[,c(1:11)]+1,main="Equity Curve") # equity curve of monthly return of 10 assets & SP500
+
+Des.Statistics = function(dat){
+  Beta = c()
+  Mean = c()
+  sd   = c()
+  skew=c()
+  kurt = c()
+  for(i in 1:10){
+    capm = lm((as.numeric(dat[,i])-as.numeric(mon.rf))~as.numeric(dat[,11]))
+    Beta[i] = capm$coefficients[2]
+    Mean[i] = mean(dat[,i])
+    sd[i]   = sd(dat[,i])
+    skew[i] = skewness(dat[,i])
+    kurt[i] = kurtosis(dat[,i])
+  }
+  d = as.data.frame(rbind(Beta,Mean,sd,skew,kurt))
+  d$market = c(1,mean(dat[,11]),sd(dat[,11]),skewness(dat[,11]),kurtosis(dat[,11]))
+  
+  colnames(d) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","SP500")
+  return(d)
+}
+
+summary.stat = Des.Statistics(mon.R) # Summary statistics of monthly returns of 10 assets and SP500
+summary.stat
+## Distribution
+plot.dist = function(dat,index=1){
+  dat = as.data.frame(dat)
+  par(mfrow=c(1,3))
+  hist(dat[,index],main=paste("Asset:",colnames(dat)[index]))
+  boxplot(sort(dat[,index]),main=paste("Asset:",colnames(dat)[index]))
+  qqnorm(dat[,index],main=paste("Asset:",colnames(dat)[index]))
+}
+# Histogram, boxplot and qqplot
+for(i in 1:ncol(mon.R)){
+plot.dist(mon.R,i)
+}
+
+## Test: Normality (Jarque-Bera) All normally distributed monthly returns
+normal.pval =c()
+normal.Xsquared=c()
+for(i in 1:ncol(mon.R)){
+nor = jarque.bera.test(mon.R[,i])
+normal.pval[i]=nor$p.value
+normal.Xsquared[i] = nor$statistic
+}  
+Normality = data.frame(rbind(normal.pval,normal.Xsquared))
+colnames(Normality)=c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","SP500")
+rownames(Normality)=c("p-values","X-squared")
+
+Normality # p-value < 0.05: non-Normal (skewed); p-value > 0.05: Normal
+
+## Test: Stationarity (Ljung-Box) All are non-stationary
+stationary.pval = c()
+stationary.Xsqared = c()
+for(i in 1:ncol(lag.mon.price)){
+  LjungBox = Box.test(lag.mon.price[,i])
+  stationary.pval[i]=LjungBox$p.value
+  stationary.Xsqared[i]=LjungBox$statistic
+}
+Stationarity = data.frame(rbind(stationary.pval,stationary.Xsqared))
+colnames(Stationarity)=c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","SP500")
+rownames(Stationarity)=c("p-values","X-squared")
+
+Stationarity # p-value > 0.05: Stationary, p-value < 0.05: non-stationary (serial correlation)
+
+#pairs(as.matrix(mon.R[,1:10]))
+
+ggpairs(as.data.frame(mon.R[,c(1:11)])) # Pair plot
+COV = cov(mon.R)
+as.data.frame(COV) # Covariance Matrix
+
+# Fit distribution
+
+fitting.loglik = function(dat){
+  dat=as.data.frame(dat)
+  Normal = c()
+  t.dist.5 = c()
+  t.dist.10 = c()
+  t.dist.15 = c()
+for(i in 1:ncol(dat)){
+  Normal[i] = fitdistr(mon.R[,i],"normal")$loglik
+  t.dist.5[i] = fitdistr(mon.R[,i],'t',start = list(m=mean(mon.R[,i]),s=sd(mon.R[,i])), df=5)$loglik
+  t.dist.10[i] = fitdistr(mon.R[,i],'t',start = list(m=mean(mon.R[,i]),s=sd(mon.R[,i])), df=10)$loglik
+  t.dist.15[i] = fitdistr(mon.R[,i],'t',start = list(m=mean(mon.R[,i]),s=sd(mon.R[,i])), df=15)$loglik
+}
+  d = data.frame(rbind(Normal,t.dist.5,t.dist.10,t.dist.15))
+  colnames(d) =c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","SP500")
+  rownames(d) = c("Normal","t-dist (df=5)","t-dist (df=10)", "t-dist (df=15)")
+  return(d)
+}
+
+fit = fitting.loglik(mon.R)
+fit
+
+```
+
+
+
+
+
+```{r}
+############################# Part 3 Portoflio Theory #############################
+
+########## No short-sell condition
+mean_vec = t(as.matrix(summary.stat[2,1:10]))
+COV = cov(mon.R[,1:10])
+sd_vec = sqrt(diag(COV))
+
+equality = function(w){
+  sum(w)
+}
+
+inequality = function(w){
+  c(w[1],w[2],w[3],w[4],w[5],w[6],w[7],w[8],w[9],w[10])
+}
+
+# Min-Variance Portfolio
+w.init = c(0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1)
+omega = COV
+var.Rp = function(w, cov_mat = omega){
+  as.numeric(t(w)%*%cov_mat%*%w)
+} 
+
+MVP.w = solnp(w.init,var.Rp,eqfun=equality, eqB=1, ineqfun=inequality, 
+              ineqLB =rep(0,10), ineqUB = rep(1,10),control=list(trace=0))
+MVP.ER = t(matrix(MVP.w$pars))%*%mean_vec
+MVP.sigma = 
+  sqrt(as.numeric(t(matrix(MVP.w$pars))%*%COV%*%matrix(MVP.w$pars)))
+
+#MVP.ER     # E(MVP)
+#MVP.sigma  # volatility(MVP)
+
+weight.MVP.n = data.frame(round(MVP.w$pars,5)) # MVP(weight)
+rownames(weight.MVP.n) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB")
+colnames(weight.MVP.n) = "MVP.weight"
+
+# Weight
+#weight.MVP.n
+# Monthly
+m.R.MVP.n = data.frame(MVP.ER,MVP.sigma)
+# Annulalized
+y.R.MVP.n = data.frame(MVP.ER*12,MVP.sigma*sqrt(12))
+
+
+# Tangency Portfolio: Maximizes sharpe ratio
+w.init = c(0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1)
+omega = COV
+
+NEW = data.frame(rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),
+                 rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),
+                 rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)))
+for(j in 1:10){
+  NEW[,j]=(as.numeric(mon.R[,j])-as.numeric(mon.rf))
+}
+
+colnames(NEW) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB")
+
+mean_vect.premium = colMeans(NEW)
+
+Sharpe.Rp = function(w, cov_mat=omega, avg=mean_vect.premium){
+  E.Rp = as.numeric(t(w)%*%avg) 
+  sigma.Rp = sqrt(as.numeric(t(w)%*%cov_mat%*%w))
+  neg.Sharpe = -E.Rp/sigma.Rp
+  neg.Sharpe
+}
+
+Tangent.w = solnp(w.init,Sharpe.Rp,eqfun=equality, eqB=1, ineqfun=inequality, 
+                  ineqLB =rep(0,10), ineqUB = rep(1,10),control=list(trace=0))
+
+Tangent.ER = t(matrix(Tangent.w$pars))%*%mean_vec
+Tangent.sigma = 
+  sqrt(as.numeric(t(matrix(Tangent.w$pars))%*%COV%*%matrix(Tangent.w$pars)))
+
+weight.Tan.n = data.frame(round(Tangent.w$pars,5)) # MVP(weight)
+rownames(weight.Tan.n) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB")
+colnames(weight.Tan.n) = "MVP.weight"
+
+# Weight
+#weight.Tan.n
+# Monthly
+m.R.tan.n = data.frame(Tangent.ER,Tangent.sigma)
+# Annulalized
+y.R.tan.n = data.frame(Tangent.ER*12,Tangent.sigma*sqrt(12))
+
+
+########## Short-sell allowed
+mean_vec = t(as.matrix(summary.stat[2,1:10]))
+COV = cov(mon.R[,1:10])
+sd_vec = sqrt(diag(COV))
+
+equality = function(w){
+  sum(w)
+}
+
+inequality = function(w){
+  c(w[1],w[2],w[3],w[4],w[5],w[6],w[7],w[8],w[9],w[10])
+}
+
+# Min-Variance Portfolio
+w.init = c(0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1)
+omega = COV
+var.Rp = function(w, cov_mat = omega){
+  as.numeric(t(w)%*%cov_mat%*%w)
+} 
+
+MVP.w = solnp(w.init,var.Rp,eqfun=equality, eqB=1, ineqfun=inequality, 
+              ineqLB =rep(-1,10), ineqUB = rep(1,10),control=list(trace=0))
+MVP.ER = t(matrix(MVP.w$pars))%*%mean_vec
+MVP.sigma = 
+  sqrt(as.numeric(t(matrix(MVP.w$pars))%*%COV%*%matrix(MVP.w$pars)))
+
+#MVP.ER     # E(MVP)
+#MVP.sigma  # volatility(MVP)
+
+weight.MVP.s = data.frame(round(MVP.w$pars,5)) # MVP(weight)
+rownames(weight.MVP.s) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB")
+colnames(weight.MVP.s) = "MVP.weight"
+
+# Weight
+#weight.MVP.s
+# Monthly
+m.R.MVP.s = data.frame(MVP.ER,MVP.sigma)
+# Annulalized
+y.R.MVP.s = data.frame(MVP.ER*12,MVP.sigma*sqrt(12))
+
+
+# Tangency Portfolio: Maximizes sharpe ratio
+w.init = c(0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1)
+omega = COV
+
+NEW = data.frame(rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),
+                 rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)),
+                 rep(NA,nrow(mon.R)),rep(NA,nrow(mon.R)))
+for(j in 1:10){
+  NEW[,j]=(as.numeric(mon.R[,j])-as.numeric(mon.rf))
+}
+
+colnames(NEW) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB")
+
+mean_vect.premium = colMeans(NEW)
+
+Sharpe.Rp = function(w, cov_mat=omega, avg=mean_vect.premium){
+  E.Rp = as.numeric(t(w)%*%avg) 
+  sigma.Rp = sqrt(as.numeric(t(w)%*%cov_mat%*%w))
+  neg.Sharpe = -E.Rp/sigma.Rp
+  neg.Sharpe
+}
+
+Tangent.w = solnp(w.init,Sharpe.Rp,eqfun=equality, eqB=1, ineqfun=inequality, 
+                  ineqLB =rep(-1,10), ineqUB = rep(1,10),control=list(trace=0))
+
+Tangent.ER = t(matrix(Tangent.w$pars))%*%mean_vec
+Tangent.sigma = 
+  sqrt(as.numeric(t(matrix(Tangent.w$pars))%*%COV%*%matrix(Tangent.w$pars)))
+
+weight.Tan.s = data.frame(round(Tangent.w$pars,5)) # MVP(weight)
+rownames(weight.Tan.s) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB")
+colnames(weight.Tan.s) = "MVP.weight"
+
+# Weight
+#weight.Tan.s
+# Monthly
+m.R.tan.s = data.frame(Tangent.ER,Tangent.sigma)
+# Annulalized
+y.R.tan.s = data.frame(Tangent.ER*12,Tangent.sigma*sqrt(12))
+
+
+
+Weight = data.frame(cbind(weight.MVP.n,weight.Tan.n,weight.MVP.s,weight.Tan.s))
+colnames(Weight) = c("NoShort.MVP","NoShort.Tan","Short.MVP","Short.Tan")
+rownames(Weight) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB")
+
+Month = data.frame(cbind(t(m.R.MVP.n),t(m.R.tan.n),t(m.R.MVP.s),t(m.R.tan.s) ) )
+colnames(Month) = c("NoShort.MVP","NoShort.Tan","Short.MVP","Short.Tan")
+rownames(Month) = c("Return","Volatility")
+
+Year = data.frame(cbind(t(y.R.MVP.n),t(y.R.tan.n),t(y.R.MVP.s),t(y.R.tan.s) ) )
+colnames(Year) = c("NoShort.MVP","NoShort.Tan","Short.MVP","Short.Tan")
+rownames(Year) = c("Return","Volatility")
+
+#Weight
+#Month
+#Year
+
+## VaR(0.05) (normal)
+VaR.n.MVP = -100000*(Month[1,1]+qnorm(0.05)*Month[2,1])
+VaR.n.tan = -100000*(Month[1,2]+qnorm(0.05)*Month[2,2])
+VaR.s.MVP = -100000*(Month[1,3]+qnorm(0.05)*Month[2,3])
+VaR.s.tan = -100000*(Month[1,4]+qnorm(0.05)*Month[2,4])
+ES.n.MVP = 100000*(-Month[1,1]+dnorm(qnorm(0.05))*Month[2,1]/0.05)
+ES.n.tan = 100000*(-Month[1,2]+dnorm(qnorm(0.05))*Month[2,2]/0.05)
+ES.s.MVP = 100000*(-Month[1,3]+dnorm(qnorm(0.05))*Month[2,3]/0.05)
+ES.s.tan = 100000*(-Month[1,4]+dnorm(qnorm(0.05))*Month[2,4]/0.05)
+
+ann.VaR.n.MVP = -100000*(Year[1,1]+qnorm(0.05)*Year[2,1])
+ann.VaR.n.tan = -100000*(Year[1,2]+qnorm(0.05)*Year[2,2])
+ann.VaR.s.MVP = -100000*(Year[1,3]+qnorm(0.05)*Year[2,3])
+ann.VaR.s.tan = -100000*(Year[1,4]+qnorm(0.05)*Year[2,4])
+ann.ES.n.MVP = 100000*(-Year[1,1]+dnorm(qnorm(0.05))*Year[2,1]/0.05)
+ann.ES.n.tan = 100000*(-Year[1,2]+dnorm(qnorm(0.05))*Year[2,2]/0.05)
+ann.ES.s.MVP = 100000*(-Year[1,3]+dnorm(qnorm(0.05))*Year[2,3]/0.05)
+ann.ES.s.tan = 100000*(-Year[1,4]+dnorm(qnorm(0.05))*Year[2,4]/0.05)
+
+asset.VaR = function(dat){
+  dat=as.data.frame(dat)
+  VaR = c()
+  ES=c()
+  for(i in 1:ncol(dat)){
+    VaR[i]= -100000*(mean(dat[,(i)])+qnorm(0.05)*sd(dat[,(i)]))
+    ES[i] = 100000*(-mean(dat[,i])+dnorm(qnorm(0.05))*sd(dat[,i])/0.05)
+  }
+  return(list(VaR,ES))
+}
+
+VaRs = as.data.frame(rbind(t(as.matrix(asset.VaR(mon.R)[[1]])),t(as.matrix(asset.VaR(mon.R)[[2]]))))
+colnames(VaRs)=c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","SP500")
+rownames(VaRs) = c("Monthly VaR(0.05)","Monthly ES(0.05")
+
+VaR= as.data.frame(rbind(c(VaR.n.MVP,VaR.n.tan,VaR.s.MVP,VaR.s.tan),c(ES.n.MVP,ES.n.tan,ES.s.MVP,ES.s.tan)))
+                     
+colnames(VaR) = c("NoShort.MVP","NoShort.Tan","Short.MVP","Short.Tan")
+rownames(VaR) = c("Monthly VaR(0.05)","Monthly ES(0.05")
+
+VAR = cbind(VaR,VaRs)
+
+# Compare Equity curve with SP500
+asset = mon.R[,1:10]
+
+outSeries = function(weight,dat){
+  w.series = c()
+  for(i in 1:nrow(dat)){
+    w.series[i] = t(weight)%*%as.matrix(as.numeric(dat[i,]))
+  }
+  return(w.series)
+}
+
+## Plotting Equity curve:
+n.MVP = cumsum(xts(outSeries(weight.MVP.n,asset),order.by = index(asset)))
+n.Tan = cumsum(xts(outSeries(weight.Tan.n,asset),order.by = index(asset)))
+s.MVP = cumsum(xts(outSeries(weight.MVP.s,asset),order.by = index(asset)))
+s.Tan = cumsum(xts(outSeries(weight.Tan.s,asset),order.by = index(asset)))
+SP500 = cumsum(mon.R[,11])
+#Rf    = cumsum(xts(mon.rf,order.by=index(asset)))
+series = merge(n.MVP,n.Tan,s.MVP,s.Tan,SP500)
+colnames(series) = c("MVP no short","Tangent no short","MVP short","Tangent short","S&P500")
+#dygraph(series)
+
+# Sharpe Ratio
+SHARPE = function(dat=mon.R,dat2=Month){
+  RF = mean(mon.rf)
+  SR = c()
+  for(i in 1:ncol(dat)){
+    SR[i] = (mean(dat[,i])-RF)/sd(dat[,i])
+  }
+  for(j in 1:ncol(dat2)){
+    SR[(j+ncol(dat))] = ((dat2[1,j])-RF)/(dat2[2,j])
+  }
+  return(SR)
+}
+  
+SR = data.frame(c(SHARPE()))
+rownames(SR) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","SP500","MVP no short","Tangent no short","MVP short","Tangent short")
+colnames(SR) = "Sharpe-Ratio"
+
+
+##################
+
+Weight
+Month
+Year
+VAR
+dygraph(series+1,main="Equity Curve")
+SR
+
+##################
+
+#Efficient Frontier
+stds = seq(0,1,0.1)
+sigma.min = function(w,cov_mat=omega){
+  sqrt(as.numeric(t(w)%*%cov_mat%*%w))
+}
+
+equality.2 = function(w,avg=mean_vec){
+  z1 = sum(w)
+  z2 = as.numeric(t(w)%*%avg)
+  c(z1,z2)
+}
+
+min.ER = Month[1,1]
+max.ER = max(mean_vec)
+
+MEANS = seq(min.ER,max.ER,(max.ER-min.ER)/40)
+w.init=  c(0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1)
+sigma.Rp.Vect = rep(NA,length(MEANS))
+
+for(i in 1:length(MEANS)){
+  opt = solnp(w.init, sigma.min ,eqfun=equality.2, eqB=c(1,MEANS[i]),ineqfun=inequality,
+              ineqLB =rep(-1,10), ## changeable 0 for no short, -1 allow short sell
+              ineqUB =rep(1,10),control=list(trace=0))
+  w.opt= opt$par
+  sigma.Rp.Vect[i] = sqrt(as.numeric(t(w.opt)%*%COV%*%w.opt))
+}
+
+## Tangent no short: Eff frontier
+min.ER = Month[1,1]
+max.ER = max(mean_vec)
+
+MEANS = seq(min.ER,max.ER,(max.ER-min.ER)/40)
+w.init=  c(0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1)
+sigma.Rp.Vect = rep(NA,length(MEANS))
+
+for(i in 1:length(MEANS)){
+  opt = solnp(w.init, sigma.min ,eqfun=equality.2, eqB=c(1,MEANS[i]),ineqfun=inequality,
+              ineqLB =rep(0,10), ## changeable 0 for no short, -1 allow short sell
+              ineqUB =rep(1,10),control=list(trace=0))
+  w.opt= opt$par
+  sigma.Rp.Vect[i] = sqrt(as.numeric(t(w.opt)%*%COV%*%w.opt))
+}
+
+
+opt.slope = SR[13,] ## changeable
+eff.frontier = data.frame(Volatility=sigma.Rp.Vect,ExpectedReturn = MEANS)
+ggplot(eff.frontier,aes(x=Volatility,y=ExpectedReturn))+geom_line()+
+  expand_limits(x=0,y=c(-0.005,0.025))+
+  geom_abline(intercept = mean(mon.rf), slope = opt.slope)+
+  geom_point(aes(x=Month[2,2], y=Month[1,2]), 
+           colour="blue")+
+  geom_text(aes(x=Month[2,2], y=Month[1,2]),
+            label="Tangency Portfolio")+
+  geom_point(aes(x=summary.stat[3,1], y=summary.stat[2,1]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,1], y=summary.stat[2,1]),label="CMCSA")+
+  geom_point(aes(x=summary.stat[3,2], y=summary.stat[2,2]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,2], y=summary.stat[2,2]),label="FISV")+
+  geom_point(aes(x=summary.stat[3,3], y=summary.stat[2,3]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,3], y=summary.stat[2,3]),label="MSFT")+
+  geom_point(aes(x=summary.stat[3,4], y=summary.stat[2,4]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,4], y=summary.stat[2,4]),label="JNJ")+
+  geom_point(aes(x=summary.stat[3,5], y=summary.stat[2,5]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,5], y=summary.stat[2,5]),label="CSCO")+
+  geom_point(aes(x=summary.stat[3,6], y=summary.stat[2,6]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,6], y=summary.stat[2,6]),label="ADS")+
+  geom_point(aes(x=summary.stat[3,7], y=summary.stat[2,7]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,7], y=summary.stat[2,7]),label="CL")+
+  geom_point(aes(x=summary.stat[3,8], y=summary.stat[2,8]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,8], y=summary.stat[2,8]),label="BBT")+
+  geom_point(aes(x=summary.stat[3,9], y=summary.stat[2,9]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,9], y=summary.stat[2,9]),label="AAPL")+
+  geom_point(aes(x=summary.stat[3,10], y=summary.stat[2,10]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,10], y=summary.stat[2,10]),label="BF-B")+
+  ggtitle("Efficient frontier of tangent portfolio without short")
+
+## Tangent Short: Eff frontier
+min.ER = Month[1,1]
+max.ER = max(mean_vec)
+
+MEANS = seq(min.ER,max.ER,(max.ER-min.ER)/40)
+w.init=  c(0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1)
+sigma.Rp.Vect = rep(NA,length(MEANS))
+
+for(i in 1:length(MEANS)){
+  opt = solnp(w.init, sigma.min ,eqfun=equality.2, eqB=c(1,MEANS[i]),ineqfun=inequality,
+              ineqLB =rep(-1,10), ## changeable 0 for no short, -1 allow short sell
+              ineqUB =rep(1,10),control=list(trace=0))
+  w.opt= opt$par
+  sigma.Rp.Vect[i] = sqrt(as.numeric(t(w.opt)%*%COV%*%w.opt))
+}
+
+opt.slope = SR[15,] ## changeable
+eff.frontier = data.frame(Volatility=sigma.Rp.Vect,ExpectedReturn = MEANS)
+ggplot(eff.frontier,aes(x=Volatility,y=ExpectedReturn))+geom_line()+
+  expand_limits(x=0,y=c(-0.005,0.025))+
+  geom_abline(intercept = mean(mon.rf), slope = opt.slope)+
+  geom_point(aes(x=Month[2,4], y=Month[1,4]), 
+           colour="blue")+
+  geom_text(aes(x=Month[2,4], y=Month[1,4]),
+            label="Tangency Portfolio")+
+  geom_point(aes(x=summary.stat[3,1], y=summary.stat[2,1]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,1], y=summary.stat[2,1]),label="CMCSA")+
+  geom_point(aes(x=summary.stat[3,2], y=summary.stat[2,2]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,2], y=summary.stat[2,2]),label="FISV")+
+  geom_point(aes(x=summary.stat[3,3], y=summary.stat[2,3]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,3], y=summary.stat[2,3]),label="MSFT")+
+  geom_point(aes(x=summary.stat[3,4], y=summary.stat[2,4]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,4], y=summary.stat[2,4]),label="JNJ")+
+  geom_point(aes(x=summary.stat[3,5], y=summary.stat[2,5]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,5], y=summary.stat[2,5]),label="CSCO")+
+  geom_point(aes(x=summary.stat[3,6], y=summary.stat[2,6]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,6], y=summary.stat[2,6]),label="ADS")+
+  geom_point(aes(x=summary.stat[3,7], y=summary.stat[2,7]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,7], y=summary.stat[2,7]),label="CL")+
+  geom_point(aes(x=summary.stat[3,8], y=summary.stat[2,8]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,8], y=summary.stat[2,8]),label="BBT")+
+  geom_point(aes(x=summary.stat[3,9], y=summary.stat[2,9]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,9], y=summary.stat[2,9]),label="AAPL")+
+  geom_point(aes(x=summary.stat[3,10], y=summary.stat[2,10]), colour="blue")+
+  geom_text(aes(x=summary.stat[3,10], y=summary.stat[2,10]),label="BF-B")+
+  ggtitle("Efficient frontier of tangent portfolio with short")
+```
+
+
+
+```{r}
+############################# Part 4 Assets Allocation #############################
+# Without short sell, set target return of S&P500 
+#(IF can't shortsell: 6% annually impossible because all selected has avg monthly return greater than 0.5%)
+## 1. Only Risky asset
+w.init = c(0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1)
+omega = COV
+
+var.Rp = function(w, cov_mat = omega){
+  as.numeric(t(w)%*%cov_mat%*%w)
+} 
+# Constrain funciton
+equality = function(w,avg=mean_vec){
+  c(sum(w),w%*%avg)
+}
+
+inequality = function(w){
+  c(w[1],w[2],w[3],w[4],w[5],w[6],w[7],w[8],w[9],w[10])
+}
+
+# Set mu= mean(SP500): short sell not allowed 
+risky.w = solnp(w.init,var.Rp,eqfun=equality, eqB=c(1,summary.stat[2,11]), ineqfun=inequality, 
+                  ineqLB = rep(0,10), ineqUB = rep(1,10),control=list(trace=0))
+
+# Set mu= mean(SP500): short sell allowed 
+risky.w.1 = solnp(w.init,var.Rp,eqfun=equality, eqB=c(1,summary.stat[2,11]), ineqfun=inequality, 
+                  ineqLB = rep(-1,10), ineqUB = rep(1,10),control=list(trace=0))
+
+# Set mu= 0.005: short sell allowed 
+risky.w.2 = solnp(w.init,var.Rp,eqfun=equality, eqB=c(1,0.005), ineqfun=inequality, 
+                ineqLB = rep(-1,10), ineqUB = rep(1,10),control=list(trace=0))
+
+risky.ER = t(matrix(risky.w$pars))%*%mean_vec
+risky.sigma = 
+  sqrt(as.numeric(t(matrix(risky.w$pars))%*%COV%*%matrix(risky.w$pars)))
+
+risky.VaR = -100000*(risky.ER + qnorm(0.05)*risky.sigma)
+
+
+risky.ER.1 = t(matrix(risky.w.1$pars))%*%mean_vec
+risky.sigma.1 = 
+  sqrt(as.numeric(t(matrix(risky.w.1$pars))%*%COV%*%matrix(risky.w.1$pars)))
+
+risky.VaR.1 = -100000*(risky.ER.1 + qnorm(0.05)*risky.sigma.1)
+
+risky.ER.2 = t(matrix(risky.w.2$pars))%*%mean_vec
+risky.sigma.2 = 
+  sqrt(as.numeric(t(matrix(risky.w.2$pars))%*%COV%*%matrix(risky.w.2$pars)))
+
+risky.VaR.2 = -100000*(risky.ER.2 + qnorm(0.05)*risky.sigma.2)
+
+risky.ES  = 100000*(-risky.ER +dnorm(qnorm(0.05))*risky.sigma/0.05)
+risky.ES.1  = 100000*(-risky.ER.1 +dnorm(qnorm(0.05))*risky.sigma.1/0.05)
+risky.ES.2  = 100000*(-risky.ER.2 +dnorm(qnorm(0.05))*risky.sigma.2/0.05)
+
+d = c(risky.ER,risky.sigma,risky.VaR,risky.ES)
+w = risky.w
+
+d1 = c(risky.ER.1,risky.sigma.1,risky.VaR.1,risky.ES.1)
+w1 = risky.w.1
+
+d2 = c(risky.ER.2,risky.sigma.2,risky.VaR.2,risky.ES.2)
+w2 = risky.w.2
+
+RISKY = cbind(d,d1,d2)
+colnames(RISKY) = c("No short (target = SP500)", "Short (target = SP500)", "Short (target = 0.5%)")
+rownames(RISKY) = c("Expected Return","Volatility","VaR(0.05)","ES(0.05)")
+
+RISKY.w = cbind(round(w$pars,5),round(w1$pars,5),round(w2$pars,5))
+colnames(RISKY.w) = c("No short (target = SP500)", "Short (target = SP500)", "Short (target = 0.5%)")
+rownames(RISKY.w) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB")
+
+RISKY
+RISKY.w
+
+#############
+# Without short sell, set target return of S&P500 
+#(IF can't shortsell: 6% annually impossible because all selected has avg monthly return greater than 0.5%)
+## 1. Only Risky asset
+w.init = rep(1/11,11)
+dat.rf = merge(mon.R[,1:10],xts(as.numeric(mon.rf),order.by=index(mon.R)))
+colnames(dat.rf) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","rf")
+means = c(mean_vec,mean(mon.rf))
+
+omega = cov(dat.rf)
+
+var.Rp = function(w, cov_mat = omega){
+  as.numeric(t(w)%*%cov_mat%*%w)
+} 
+
+# Constrain funciton
+equality = function(w,avg=means){
+  c(sum(w),w%*%avg)
+}
+
+inequality = function(w){
+  c(w[1],w[2],w[3],w[4],w[5],w[6],w[7],w[8],w[9],w[10],w[11])
+}
+
+# Set mu= mean(SP500): short sell not allowed 
+com.w = solnp(w.init,var.Rp,eqfun=equality, eqB=c(1,summary.stat[2,11]), ineqfun=inequality, 
+                ineqLB = rep(0,11), ineqUB = rep(1,11),control=list(trace=0))
+
+# Set mu= mean(SP500): short sell allowed 
+com.w.1 = solnp(w.init,var.Rp,eqfun=equality, eqB=c(1,summary.stat[2,11]), ineqfun=inequality, 
+                ineqLB = rep(-1,11), ineqUB = rep(1,11),control=list(trace=0))
+
+# mu = 0.5% monthly: short sell not allowed
+com.w.2 = solnp(w.init,var.Rp,eqfun=equality, eqB=c(1,0.005), ineqfun=inequality, 
+              ineqLB = rep(0,11), ineqUB = rep(1,11),control=list(trace=0))
+
+# mu = 0.5% monthly: short sell allowed
+com.w.3 = solnp(w.init,var.Rp,eqfun=equality, eqB=c(1,0.005), ineqfun=inequality, 
+              ineqLB = rep(-1,11), ineqUB = rep(1,11),control=list(trace=0))
+
+######
+com.ER = t(matrix(com.w$pars))%*%means
+com.sigma = sqrt(as.numeric(t(matrix(com.w$pars))%*%omega%*%matrix(com.w$pars)))
+com.VaR = -100000*(com.ER + qnorm(0.05)*com.sigma)
+
+com.ER.1 = t(matrix(com.w.1$pars))%*%means
+com.sigma.1 = sqrt(as.numeric(t(matrix(com.w.1$pars))%*%omega%*%matrix(com.w.1$pars)))
+com.VaR.1 = -100000*(com.ER.1 + qnorm(0.05)*com.sigma.1)
+
+com.ER.2 = t(matrix(com.w.2$pars))%*%means
+com.sigma.2 = sqrt(as.numeric(t(matrix(com.w.2$pars))%*%omega%*%matrix(com.w.2$pars)))
+com.VaR.2 = -100000*(com.ER.2 + qnorm(0.05)*com.sigma.2)
+
+com.ER.3 = t(matrix(com.w.3$pars))%*%means
+com.sigma.3 = sqrt(as.numeric(t(matrix(com.w.3$pars))%*%omega%*%matrix(com.w.3$pars)))
+com.VaR.3 = -100000*(com.ER.3 + qnorm(0.05)*com.sigma.3)
+
+com.ES = 100000*(-com.ER + dnorm(qnorm(0.05))*com.sigma/0.05)
+com.ES.1 = 100000*(-com.ER.1 + dnorm(qnorm(0.05))*com.sigma.1/0.05)
+com.ES.2 = 100000*(-com.ER.2 + dnorm(qnorm(0.05))*com.sigma.2/0.05)
+com.ES.3 = 100000*(-com.ER.3 + dnorm(qnorm(0.05))*com.sigma.3/0.05)
+
+
+d = c(com.ER,com.sigma,com.VaR,com.ES)
+w = com.w$pars
+
+d1 = c(com.ER.1,com.sigma.1,com.VaR.1,com.ES.1)
+w1 = com.w.1$pars
+
+d2 = c(com.ER.2,com.sigma.2,com.VaR.2,com.ES.2)
+w2 = com.w.2$pars
+
+d3 = c(com.ER.3,com.sigma.3,com.VaR.3,com.ES.3)
+w3 = com.w.3$pars
+
+
+COM = cbind(d,d1,d2,d3)
+colnames(COM) = c("No short (target = SP500)","Short (target = SP500)", "No short (target = 0.5%)","Short (target = 0.5%)")
+rownames(COM) = c("Expected Return","Volatility","VaR(0.05)","ES(0.05)")
+
+COM.w = cbind(round(w,5),round(w1,5),round(w2,5),round(w3,5))
+colnames(COM.w) = c("No short (target = SP500)","Short (target = SP500)", "No short (target = 0.5%)","Short (target = 0.5%)")
+rownames(COM.w) = c("CMCSA","FISV","MSFT","JNJ","CSCO","ADS","CL","BBT","AAPL","BFB","rf")
+
+COM
+COM.w
+```
+
+
+
+```{r}
+################ Part 5 Principal Component Analysis ######################
+mr.data <- as.data.frame(mon.R)
+cor_matr <- cor(mr.data[ ,1:10],method = "pearson")
+max(cor_matr[which(cor_matr!=1)]) # JNJ & CL
+min(cor_matr[which(cor_matr!=1)]) # BBT & CL
+
+### Correlation Matrix
+# install.packages("PerformanceAnalytics")
+chart.Correlation(mr.data[ ,1:10],histogram = TRUE,pch=19)
+
+# install.packages("corrgram")
+corrgram(mr.data[,1:10], order=T, lower.panel=panel.shade,
+         upper.panel=panel.pie, text.panel=panel.txt,
+         main="Correlations of the Returns on Our Assets")
+```
+
+```{r}
+### PCA
+pcaEq = prcomp(mr.data[ , 1:10])
+summary(pcaEq)
+plot(pcaEq,main="Scree Plot for Our Assests")
+
+Names = names(mr.data)[1:10]
+plot(pcaEq$rotation[,1],type="b",ylab="PC",lwd=2,ylim=c(-1.4,2),main="The first three eigen-vectors")
+lines(pcaEq$rotation[,2],type="b",lty=2,lwd=2,col="red")
+lines(pcaEq$rotation[,3],type="b",lty=3,lwd=2,col="blue")
+lines(0:9,0*(0:9))
+legend("topleft",c("PC1","PC2","PC3"),lty=c(1,2,3),lwd=2,cex=.55,col=c("black", "red", "blue"))
+```
+
+
+
+
+```{r}
+################################ Part 6 ###################################
+### Compute Return of all Profotilos
+mon.R <- as.data.frame(mon.R)
+asset.Return <- function(dat = mon.R, weight = Weight[ , 1]){
+  weight = as.matrix(weight)
+  if(nrow(weight) == 10){m1 = as.matrix(dat[ ,1:10])}
+  else{m1 = cbind(as.matrix(dat[ ,1:10]), as.matrix(mon.rf))}
+  R = m1%*%weight
+  return(R)
+}
+asset.1 <- asset.Return(mon.R,Weight[ , 1])
+asset.2 <- asset.Return(mon.R,Weight[ , 2])
+asset.3 <- asset.Return(mon.R,Weight[ , 3])
+asset.4 <- asset.Return(mon.R,Weight[ , 4])
+
+asset.5 <- asset.Return(mon.R,COM.w[ , 1])
+asset.6 <- asset.Return(mon.R,COM.w[ , 2])
+asset.7 <- asset.Return(mon.R,COM.w[ , 3])
+asset.8 <- asset.Return(mon.R,COM.w[ , 4])
+
+
+assetReturn <- as.data.frame(cbind(asset.1, asset.2, asset.3, asset.4, asset.5, asset.6, asset.7,asset.8))
+colnames(assetReturn) <- cbind(t(colnames(Weight)),t(colnames(COM.w)))
+rm(asset.1, asset.2, asset.3, asset.4, asset.5, asset.6, asset.7,asset.8)
+```
+
+
+
+```{r}
+## Estimate VaRs and expected shortfall of these assets by nonparametric method
+nonpara.Method <- function(amount = 100000, alpha = 0.05, data = assetReturn[ ,1]){
+  q = as.numeric(quantile(data,alpha))
+  VaR_nonp = -amount*q
+  IEVaR = (data < q)
+  ES_nonp = -amount * sum(data*IEVaR) / sum(IEVaR)
+  result = rbind(VaR_nonp,ES_nonp)
+  return(result)
+}
+
+nonpara.Result <- as.data.frame(matrix(nrow = 6, ncol = ncol(assetReturn)))
+
+for(i in 1:ncol(assetReturn)){
+  nonpara.Result[1:2 ,i] <- nonpara.Method(amount = 100000, alpha = 0.05,data = assetReturn[ ,i])
+}
+
+colnames(nonpara.Result) <- colnames(assetReturn)
+rownames(nonpara.Result)[1:2] <- c("VaR_nonp","ES_nonp")
+
+nonpara.Result
+
+
+## Individual Stock  by nonparametric method
+nonpara.Result.ind <- as.data.frame(matrix(nrow = 2, ncol = ncol(mon.R)))
+for(i in 1:ncol(mon.R)){
+  nonpara.Result.ind[1:2 ,i] <- nonpara.Method(amount = 100000, 
+                                               alpha = 0.05,data = mon.R[ ,i])
+}
+colnames(nonpara.Result.ind) = colnames(mon.R)
+rownames(nonpara.Result.ind) = c("VaR_nonp","ES_nonp")
+
+nonpara.Result.ind
+```
+
+
+
+
+```{r}
+## Estimate VaRs and expected shortfall of these assets by parametric method 
+para.Method <- function(amount = 100000, alpha = 0.05, data = assetReturn[ ,1]){
+  fitnormal = fitdistr(data,"normal")
+  param = as.numeric(fitnormal$estimate)
+  mean = param[1]
+  sd = param[2]
+  VaR_par = -amount*(mean + qnorm(alpha)*sd)
+  ES_par = amount*(-mean + sd*(dnorm(qnorm(alpha))/alpha))
+  result = rbind(VaR_par,ES_par)
+  return(result)
+}
+
+para.Result <- as.data.frame(matrix(nrow = 6, ncol = ncol(assetReturn)))
+
+for(i in 1:ncol(assetReturn)){
+  para.Result[1:2 ,i] <- para.Method(amount = 100000, alpha = 0.05,data = assetReturn[ ,i])
+}
+colnames(para.Result) <- colnames(assetReturn)
+rownames(para.Result)[1:2] <- c("VaR_par","ES_par")
+
+para.Result
+
+## Individual Stock  by parametric method
+para.Result.ind <- as.data.frame(matrix(nrow = 2, ncol = ncol(mon.R)))
+for(i in 1:ncol(mon.R)){
+  para.Result.ind[1:2 ,i] <- para.Method(amount = 100000, 
+                                               alpha = 0.05,data = mon.R[ ,i])
+}
+colnames(para.Result.ind) = colnames(mon.R)
+rownames(para.Result.ind) = c("VaR_par","ES_par")
+para.Result.ind
+```
+
+
+```{r}
+### Use the bootstrap to compute estimated standard errors and 95% confidence intervals for our 5% VaR and expected short fall.
+set.seed(123)
+
+bootCI <- function(B = 200, n = 100, data =  assetReturn[ ,1]){
+  result <- data.frame()
+  for(i in 1:B){
+    data_b = sample(data,n,replace=TRUE)
+    result.non = nonpara.Method(amount = 100000, alpha = 0.05,data = data_b)
+    result.par = para.Method(amount = 100000, alpha = 0.05,data = data_b)
+    combine = cbind(t(result.non),t(result.par))
+    result = rbind(result,combine)
+  }
+  return(result)
+}
+
+SE = list()
+for(i in 1:ncol(assetReturn)){
+  BootResult <- bootCI(B = 200, n = 1000,data =  assetReturn[ ,i])
+  
+  VaR_nonp_CI <- quantile(BootResult[,1],c(.025,.975))
+  ES_nonp_CI <- quantile(BootResult[,2],c(.025,.975))
+  VaR_par_CI <- quantile(BootResult[,3],c(.025,.975))
+  ES_par_CI <- quantile(BootResult[,4],c(.025,.975))
+  
+  se <- as.data.frame(apply(BootResult,2,sd)) ## stand errors
+  SE[i] <- se
+  
+  nonpara.Result[3, i] <- VaR_nonp_CI[1]
+  nonpara.Result[4, i] <- VaR_nonp_CI[2]
+  nonpara.Result[5, i] <- ES_nonp_CI[1]
+  nonpara.Result[6, i] <- ES_nonp_CI[2]
+
+  para.Result[3, i] <- VaR_par_CI[1]
+  para.Result[4, i] <- VaR_par_CI[2]
+  para.Result[5, i] <- ES_par_CI[1]
+  para.Result[6, i] <- ES_par_CI[2]
+}
+
+rownames(nonpara.Result) <- c("VaR_nonp", "ES_nonp" ,"VaR_nonp_low","VaR_nonp_up",
+                              "ES_nonp_low","ES_nonp_up")
+rownames(para.Result) <- c("VaR_par", "ES_par" ,"VaR_par_low","VaR_par_up",
+                           "ES_par_low","ES_par_up")
+
+nonpara.Result
+para.Result
+###########################################################################
+```
+
+
+
+```{r}
+################################ Part 7 Copulas ###################################
+
+asset1 = assetReturn[ , 1]
+sp500 = mon.R[ , 11]
+
+est.asset1 = as.numeric( fitdistr(asset1,"t")$estimate )
+est.sp500 = as.numeric( fitdistr(sp500,"t")$estimate )
+
+est.asset1[2] = est.asset1[2] * sqrt( est.asset1[3] / (est.asset1[3]-2) )
+est.sp500[2] = est.sp500[2] * sqrt(est.sp500[3] / (est.sp500[3]-2) )
+
+cor_tau = cor(asset1, sp500, method = "kendall")
+omega = sin((pi/2)*cor_tau)
+
+cop_t_dim2 = tCopula(omega, dim = 2, dispstr = "un", df = 4)
+
+data1 = cbind(pstd(asset1, est.asset1[1], est.asset1[2], est.asset1[3]), 
+              pstd(sp500, est.sp500[1], est.sp500[2], est.sp500[3]))
+
+n = nrow(assetReturn) 
+
+data2 = cbind(rank(asset1)/(n+1), rank(sp500)/(n+1))
+
+ft1 = fitCopula(cop_t_dim2, data1, method="ml", start=c(omega,4) ) 
+ft2 = fitCopula(cop_t_dim2, data2, method="ml", start=c(omega,4) ) 
+summary(ft1)
+summary(ft2)
+
+```
+
+
+```{r}
+mvdc_t_t = mvdc( cop_t_dim2, c("std","std"), list(
+  list(mean=est.asset1[1],sd=est.asset1[2],nu=est.asset1[3]),
+  list(mean=est.sp500[1],sd=est.sp500[2],nu=est.sp500[3])))
+start = c(est.asset1, est.sp500, ft1@estimate)
+objFn = function(param) -loglikMvdc(param,cbind(asset1,sp500),mvdc_t_t)
+tic = proc.time()
+ft = optim(start, objFn, method="L-BFGS-B",
+           lower = c(-.1,0.001,2.2, -0.1,0.001,2.2,  0.2,2.5),
+           upper = c( .1,   10, 15,  0.1,   10, 15,  0.9, 15) )
+toc = proc.time()
+total_time = toc - tic ; total_time[3]/60
+```
+
+
+```{r}
+##################################################
+
+
+x1 = asset1
+fit1 = st.mple(matrix(1,n,1), y=x1, dp = c(mean(x1),sd(x1),0,10))
+est1 = fit1$dp
+u1 = pst(x1, dp=est1)
+
+x2 = sp500
+fit2 = st.mple(matrix(1,n,1), y=x2, dp = c(mean(x2),sd(x2),0,10))
+est2 = fit2$dp
+u2 = pst(x2, dp=est2)
+U.hat = cbind(u1,u2)
+
+z1 = qnorm(u1)
+z2 = qnorm(u2)
+Z.hat = cbind(z1,z2)
+
+##################################################
+fhatU = kde(x=U.hat, H=Hscv(x=U.hat))
+par(mfrow=c(2,2))
+hist(u1, main="(a)", xlab=expression(hat(U)[1]), freq = FALSE)
+hist(u2, main="(b)", xlab=expression(hat(U)[2]), freq = FALSE)
+plot(u1, u2, main="(c)", xlab = expression(hat(U)[1]), ylab = expression(hat(U)[2]), mgp = c(2.5, 1, 0))
+plot(fhatU, drawpoints=FALSE, drawlabels=FALSE, cont=seq(10, 80, 10), 
+     main="(d)", xlab=expression(hat(U)[1]), ylab=expression(hat(U)[2]), mgp = c(2.5, 1, 0)) 
+
+
+##################################################
+
+fhatZ = kde(x=Z.hat, H=Hscv(x=Z.hat))
+par(mfrow=c(2,2), cex.axis=1.2, cex.lab=1.2, cex.main=1.2)
+qqnorm(z1, datax=T, main="(a)") ; qqline(z1)
+qqnorm(z2, datax=T, main="(b)") ; qqline(z2)
+plot(z1, z2, main="(c)", xlab = expression(hat(Z)[1]), ylab = expression(hat(Z)[2]), mgp = c(2.5, 1, 0))
+plot(fhatZ, drawpoints=FALSE, drawlabels=FALSE, cont=seq(10, 90, 10), 
+     main="(d)", xlab=expression(hat(Z)[1]), ylab=expression(hat(Z)[2]), mgp = c(2.5, 1, 0)) 
+```
+
+
+```{r}
+##################################################
+################# Fit Copulas  ###################
+##################################################
+fnorm = fitCopula(copula=normalCopula(dim=2),data=data1,method="ml") 
+ffrank = fitCopula(copula = frankCopula(3, dim = 2),
+                   data = data1, method = "ml")
+fclayton = fitCopula(copula = claytonCopula(1, dim=2),
+                     data = data1, method = "ml") 
+fgumbel = fitCopula(copula = gumbelCopula(3, dim=2),
+                    data = data1, method = "ml") 
+fjoe = fitCopula(copula=joeCopula(2,dim=2),data=data1,method="ml") 
+```
+
+
+```{r}
+##################################################
+#############  AICs Comparison  ##################
+##################################################
+
+# options(digits=3)
+# cor.test(u1, u2, method="spearman")
+# cor.test(u1, u2, method="kendall")
+# sin(-0.242*pi/2)
+# cor.test(u1, u2, method="pearson")
+# cor.test(z1, z2, method="pearson")
+# 
+# omega = -0.371
+# 
+# options(digits=4)
+
+est = rep(NA,6)
+max_loglik = rep(NA,6)
+AICs = rep(NA,6)
+
+# (1) t-copula
+est[1] = ft1@estimate[1]
+max_loglik[1] = loglikCopula(param=ft1@estimate, u=U.hat, copula=tCopula(dim = 2))
+AICs[1] =-2*max_loglik[1] + 2*length(ft1@estimate)
+
+# (2) Gauss-copula (Normal)
+est[2]=fnorm@estimate
+max_loglik[2] = loglikCopula(param=fnorm@estimate, u=U.hat, copula=normalCopula(dim = 2))
+AICs[2]= -2*max_loglik[2] + 2*length(fnorm@estimate)
+
+# (3) Frank-copula
+est[3]=ffrank@estimate
+max_loglik[3] = loglikCopula(param=ffrank@estimate, u=U.hat, copula=frankCopula(dim = 2))
+AICs[3]= -2*max_loglik[3] + 2*length(ffrank@estimate)
+
+# (4) Clayton-copula
+est[4]=fclayton@estimate
+max_loglik[4] = loglikCopula(param=fclayton@estimate, u=U.hat, copula=claytonCopula(dim = 2))
+AICs[4]= -2*max_loglik[4] + 2*length(fclayton@estimate)
+
+# (5) Gumbel-copula
+est[5]=fgumbel@estimate
+max_loglik[5] = loglikCopula(param=fgumbel@estimate, u=U.hat, copula=gumbelCopula(dim = 2))
+AICs[5]= -2*max_loglik[5] + 2*length(fgumbel@estimate)
+
+# (6) Joe-copula
+est[6]=fjoe@estimate
+max_loglik[6] = loglikCopula(param=fjoe@estimate, u=U.hat, copula=joeCopula(dim = 2))
+AICs[6]= -2*max_loglik[6] + 2*length(fjoe@estimate)
+
+comparison = cbind(est,max_loglik,AICs)
+rownames(comparison) = c("t","Gauss","Frank","Clayton","Gumbel","Joe")
+comparison
+```
+
+```{r}
+##################################################
+
+par(mfrow=c(2,4))
+plot(u1, u2, main="Uniform-Transformed Data",
+     xlab = expression(hat(U)[1]), ylab = expression(hat(U)[2]))
+Udex = (1:n)/(n+1)
+Cn = C.n(u = cbind(rep(Udex, n), rep(Udex, each=n)) , X = U.hat, 
+         offset=0, method="C")
+EmpCop = expression(contour(Udex,Udex,matrix(Cn,n,n), col=2, add=T))
+
+#
+contour(tCopula(param=ft1@estimate[1], dim=2, 
+                df=round(ft1@estimate[2])), 
+        pCopula, main = expression(hat(C)[t]), 
+        xlab = expression(hat(U)[1]), ylab = expression(hat(U)[2]))
+eval(EmpCop)
+#
+contour(normalCopula(param=fnorm@estimate[1], dim = 2), 
+        pCopula, main = expression(hat(C)[Gauss]),
+        xlab = expression(hat(U)[1]), ylab = expression(hat(U)[2]))
+eval(EmpCop)
+#
+contour(frankCopula(param=ffrank@estimate[1], dim = 2), 
+        pCopula, main = expression(hat(C)[Fr]),
+        xlab = expression(hat(U)[1]), ylab = expression(hat(U)[2]))
+eval(EmpCop)
+#
+contour(claytonCopula(param=fclayton@estimate[1], dim = 2), 
+        pCopula, main = expression(hat(C)[Cl]),
+        xlab = expression(hat(U)[1]), ylab = expression(hat(U)[2]))
+eval(EmpCop)
+#
+contour(claytonCopula(param=fgumbel@estimate[1], dim = 2), 
+        pCopula, main = expression(hat(C)[Gu]),
+        xlab = expression(hat(U)[1]), ylab = expression(hat(U)[2]))
+eval(EmpCop)
+#
+contour(claytonCopula(param=fjoe@estimate[1], dim = 2), 
+        pCopula, main = expression(hat(C)[Joe]),
+        xlab = expression(hat(U)[1]), ylab = expression(hat(U)[2]))
+eval(EmpCop)
+```
+
+
+
+```{r}
+par(mfrow=c(2,3))
+contour(tCopula(param=ft$par[7],dim=2,df=round(ft$par[8])),
+        dCopula, main = expression(hat(c)[t]), mgp = c(2.5,1,0), 
+        nlevels=25, xlab=expression(hat(U)[1]),ylab=expression(hat(U)[2]))
+contour(kde2d(data1[,1],data1[,2]), col = 2, add = TRUE)
+contour(normalCopula(param=fnorm@estimate[1], dim = 2), 
+        dCopula, main = expression(hat(c)[Gauss]), mgp = c(2.5,1,0),
+        nlevels=25, xlab=expression(hat(U)[1]),ylab=expression(hat(U)[2]))
+contour(kde2d(data1[,1],data1[,2]), col = 2, add = TRUE)
+contour(frankCopula(param=ffrank@estimate[1], dim = 2), 
+        dCopula, main = expression(hat(c)[Fr]), mgp = c(2.5,1,0),
+        nlevels=25, xlab=expression(hat(U)[1]),ylab=expression(hat(U)[2]))
+contour(kde2d(data1[,1],data1[,2]), col = 2, add = TRUE)
+contour(claytonCopula(param=fclayton@estimate[1], dim = 2), 
+        dCopula, main = expression(hat(c)[Cl]), mgp = c(2.5,1,0),
+        nlevels=25, xlab=expression(hat(U)[1]),ylab=expression(hat(U)[2]))
+contour(kde2d(data1[,1],data1[,2]), col = 2, add = TRUE)
+contour(gumbelCopula(param=fgumbel@estimate[1], dim = 2), 
+        dCopula, main = expression(hat(c)[Gu]), mgp = c(2.5,1,0),
+        nlevels=25, xlab=expression(hat(U)[1]),ylab=expression(hat(U)[2]))
+contour(kde2d(data1[,1],data1[,2]), col = 2, add = TRUE)
+contour(joeCopula(param=fjoe@estimate[1], dim = 2), 
+        dCopula, main = expression(hat(c)[Joe]), mgp = c(2.5,1,0),
+        nlevels=25, xlab=expression(hat(U)[1]),ylab=expression(hat(U)[2]))
+contour(kde2d(data1[,1],data1[,2]), col = 2, add = TRUE)
+###########################################################################
+```
+
+
+
+
+
+
+
+
+
+
